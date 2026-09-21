@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ATLAS — Autonomous Trading Agent</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>ATLAS <span class="tag">Autonomous Trading Agent</span></h1>
+    <nav>
+      <button data-view="overview" class="active">Overview</button>
+      <button data-view="trades">Trades</button>
+      <button data-view="decisions">Decisions</button>
+      <button data-view="license">License</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="view-overview" class="view active">
+      <div id="cards" class="cards"></div>
+      <div class="panel">
+        <h2>Equity curve</h2>
+        <canvas id="equityChart" height="220"></canvas>
+      </div>
+      <div class="panel">
+        <h2>Open positions</h2>
+        <table id="positionsTable">
+          <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Last</th><th>uPnL</th><th>uPnL %</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="positionsEmpty" class="muted">No open positions.</p>
+      </div>
+    </section>
+
+    <section id="view-trades" class="view">
+      <div class="panel">
+        <h2>Closed trades</h2>
+        <table>
+          <thead><tr><th>Opened</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>P&amp;L %</th><th>Reason</th><th>Conviction</th></tr></thead>
+          <tbody id="tradesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="view-decisions" class="view">
+      <div class="panel">
+        <h2>Decision journal</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Conviction</th><th>Details</th></tr></thead>
+          <tbody id="decisionsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="view-license" class="view">
+      <div class="panel">
+        <h2>Subscription license</h2>
+        <div id="licenseStatus" class="license-box"></div>
+        <h3>Verify a key</h3>
+        <input id="verifyInput" type="text" placeholder="ATLAS.xxxx.yyyy" autocomplete="off">
+        <button id="verifyBtn">Verify</button>
+        <div id="verifyResult"></div>
+        <h3>Generate / renew keys (admin)</h3>
+        <label>Admin token <input id="adminToken" type="password" autocomplete="off"></label>
+        <label>Customer <input id="customer" type="text" placeholder="acme-trader"></label>
+        <label>Months <input id="months" type="number" value="1" min="1"></label>
+        <div>
+          <button id="genBtn">Generate</button>
+          <button id="renewBtn">Renew (re-sign current key +N months)</button>
+        </div>
+        <div id="genResult"></div>
+      </div>
+    </section>
+  </main>
+
+  <template id="cardTmpl">
+    <div class="card"><div class="k"></div><div class="v"></div></div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
