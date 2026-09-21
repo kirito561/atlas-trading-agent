@@ -196,17 +196,15 @@ class TestRiskModes(unittest.TestCase):
         risk = RiskManager(cfg, broker)
         self.assertEqual(risk.min_conviction_floor(), 7)
 
-    def test_aggressive_enlarges_within_risk_budget(self):
-        cfg = make_cfg(risk_per_trade=0.02, max_position_pct=0.06, aggressive_enabled=True,
+    def test_aggressive_clamped_to_hard_cap(self):
+        cfg = make_cfg(risk_per_trade=0.02, max_position_pct=0.08, aggressive_enabled=True,
                        aggressive_size_factor=1.2, defensive_drawdown_threshold=0.03)
         broker = FakeBroker(equity=1000, cash=1000)
         risk = RiskManager(cfg, broker)
         risk.run_cycle_hooks(1000)
         self.assertEqual(risk.operate_mode(), "aggressive")
-        normal_qty = 1000 * 0.06 / 100
         sized = risk.size_position(long_analysis(price=100, stop_pct=0.03))
-        self.assertTrue(sized["qty"] > normal_qty)
-        self.assertLessEqual(sized["notional"], 1000 * 0.06 * 1.2 + 1e-6)
+        self.assertLessEqual(sized["notional"], 1000 * 0.08 + 1e-6)
         self.assertLessEqual(sized["qty"] * sized["entry"] * sized["stop_pct"], 1000 * 0.02 + 1e-6)
 
     def test_effective_risk_never_exceeds_budget_even_aggressive(self):
@@ -218,6 +216,24 @@ class TestRiskModes(unittest.TestCase):
         sized = risk.size_position(long_analysis(price=100, stop_pct=0.08))
         effective = sized["qty"] * sized["entry"] * sized["stop_pct"]
         self.assertLessEqual(effective, 1000 * 0.02 + 1e-6)
+
+
+class TestCorrelationCap(unittest.TestCase):
+    def test_correlation_cap_blocks_at_threshold(self):
+        cfg = make_cfg(max_positions=10, correlated_exposure_cap=0.20)
+        broker = FakeBroker(equity=1000, cash=1000)
+        risk = RiskManager(cfg, broker)
+        broker.open_position("BTC/USDT", Side.LONG, 1, 100, 90, 120, 8, "t")
+        ok, _ = risk.can_open_more()
+        self.assertTrue(ok)
+        broker.open_position("ETH/USDT", Side.LONG, 1, 100, 90, 120, 8, "t")
+        ok, reason = risk.can_open_more()
+        self.assertFalse(ok)
+        self.assertIn("correlated", reason)
+
+    def test_default_correlation_cap(self):
+        cfg = make_cfg(max_positions=10)
+        self.assertAlmostEqual(cfg.correlated_exposure_cap, 0.20, places=4)
 
     def test_drawdown_halt_beats_defensive(self):
         cfg = make_cfg(drawdown_halt=0.10, defensive_drawdown_threshold=0.03)

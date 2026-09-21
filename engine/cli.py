@@ -12,8 +12,14 @@ from .broker.bybit_live import BybitLiveBroker
 from .broker.paper import PaperBroker
 from .config import Config
 from .data import SynthData
+from .lock import InstanceLock
 from .memory.storage import Store
 from .risk.manager import RiskManager
+
+
+def with_instance_lock(cfg: Config, hold: bool = True) -> InstanceLock | None:
+    lock = InstanceLock(cfg.lock_file)
+    return lock if lock.acquire(hold=hold) else None
 
 
 def make_broker(cfg: Config) -> Broker:
@@ -52,8 +58,15 @@ def cmd_run(cfg: Config, args) -> int:
     if not ok:
         print("refusing to trade: invalid license -> " + json.dumps(status))
         return 1
-    engine, _, _, _ = make_engine(cfg)
-    engine.run_forever()
+    lock = with_instance_lock(cfg)
+    if lock is None:
+        print("refusing to start: another ATLAS instance is already running (data/atlas.lock)")
+        return 1
+    try:
+        engine, _, _, _ = make_engine(cfg)
+        engine.run_forever()
+    finally:
+        lock.release()
     return 0
 
 
@@ -63,12 +76,19 @@ def cmd_once(cfg: Config, args) -> int:
     if not ok:
         print("refusing to trade: invalid license -> " + json.dumps(status))
         return 1
-    engine, risk, broker, store = make_engine(cfg)
-    equity = broker.mark_to_market()
-    risk.run_cycle_hooks(equity)
-    summary = engine.cycle()
-    status = engine.status()
-    print(json.dumps({"status": status, "cycle": summary}, indent=2))
+    lock = with_instance_lock(cfg)
+    if lock is None:
+        print("refusing to start: another ATLAS instance is already running (data/atlas.lock)")
+        return 1
+    try:
+        engine, risk, broker, store = make_engine(cfg)
+        equity = broker.mark_to_market()
+        risk.run_cycle_hooks(equity)
+        summary = engine.cycle()
+        status = engine.status()
+        print(json.dumps({"status": status, "cycle": summary}, indent=2))
+    finally:
+        lock.release()
     return 0
 
 
@@ -132,6 +152,14 @@ def cmd_kill(cfg: Config, args) -> int:
         return 0
     cfg.kill_switch_file.write_text("engaged", encoding="utf-8")
     print("kill switch engaged - engine will close all positions and halt on next cycle")
+    if cfg.is_live:
+        try:
+            engine, risk, broker, store = make_engine(cfg)
+            broker.cancel_all_open_orders()
+            closed = broker.flatten()
+            print(f"flattened {len(closed)} live position(s) via exchange")
+        except Exception as e:
+            print(f"warning: live flatten failed ({e}); engine will close on next cycle")
     return 0
 
 
@@ -139,13 +167,20 @@ def cmd_reset(cfg: Config, args) -> int:
     if not args.yes:
         print("refusing to reset without --yes")
         return 1
-    engine, risk, broker, store = make_engine(cfg)
-    risk.reset()
-    if cfg.positions_file.exists():
-        cfg.positions_file.unlink()
-    if cfg.db_file.exists():
-        cfg.db_file.unlink()
-    print("reset complete")
+    lock = with_instance_lock(cfg)
+    if lock is None:
+        print("refusing to reset: another ATLAS instance is running")
+        return 1
+    try:
+        engine, risk, broker, store = make_engine(cfg)
+        risk.reset()
+        if cfg.positions_file.exists():
+            cfg.positions_file.unlink()
+        if cfg.db_file.exists():
+            cfg.db_file.unlink()
+        print("reset complete")
+    finally:
+        lock.release()
     return 0
 
 

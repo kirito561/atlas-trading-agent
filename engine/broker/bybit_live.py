@@ -150,6 +150,38 @@ class BybitLiveBroker(Broker):
         position.target = target if target is not None else position.target
         return position
 
+    def reconcile(self) -> dict:
+        exchange_positions = {p.symbol: p for p in self.get_positions()}
+        return {
+            "adopted": [p.to_dict() for p in exchange_positions.values()],
+            "orphans": [],
+            "dropped": [],
+        }
+
+    def cancel_all_open_orders(self) -> None:
+        for symbol in {p.symbol for p in self.get_positions()}:
+            market_symbol = self._symbol(symbol)
+            try:
+                self.exchange.cancel_all_orders(market_symbol)
+            except Exception as e:
+                log.warning("cancel_all_orders %s failed: %s", symbol, e)
+
+    def flatten(self) -> list[ClosedTrade]:
+        self.cancel_all_open_orders()
+        closed = []
+        for position in self.get_positions():
+            try:
+                side = "sell" if position.side == Side.LONG else "buy"
+                order = self.exchange.create_order(
+                    self._symbol(position.symbol), "market", side, position.qty,
+                )
+                fill = float(order.get("average") or position.last_price or position.entry)
+                trade = ClosedTrade.from_position(position, fill, ExitReason.RISK_HALT, 0.0006)
+                closed.append(trade)
+            except Exception as e:
+                log.warning("flatten %s failed: %s", position.symbol, e)
+        return closed
+
     def mark_to_market(self) -> float:
         equity = sum(self.exchange.fetch_balance({"type": "swap"}).get("total", {}).values())
         positions = self.get_positions()

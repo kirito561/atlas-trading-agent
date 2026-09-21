@@ -44,6 +44,22 @@ class Broker(ABC):
     def mark_to_market(self) -> float:
         ...
 
+    def reconcile(self) -> dict:
+        return {"adopted": [], "orphans": [], "dropped": []}
+
+    def cancel_all_open_orders(self) -> None:
+        return None
+
+    def flatten(self) -> list[ClosedTrade]:
+        closed = []
+        for position in self.get_positions():
+            try:
+                ticker = self.fetch_ticker(position.symbol)
+                closed.append(self.close_position(position, ticker.last, "risk_halt"))
+            except Exception:
+                continue
+        return closed
+
     @property
     @abstractmethod
     def mode(self) -> str:

@@ -4,76 +4,131 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ATLAS — Autonomous Trading Agent</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%2322c55e'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='7' fill='url(%23g)'/%3E%3Cpath d='M16 6v20M10 12l6-6 6 6' fill='none' stroke='%230b1220' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>ATLAS <span class="tag">Autonomous Trading Agent</span></h1>
-    <nav>
-      <button data-view="overview" class="active">Overview</button>
-      <button data-view="trades">Trades</button>
-      <button data-view="decisions">Decisions</button>
-      <button data-view="license">License</button>
-    </nav>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4v24M8 12l8-8 8 8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <h1>ATLAS</h1>
+        <span class="tag">Autonomous Trading Agent</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <span id="modeChip" class="chip">…</span>
+      <button id="refreshBtn" class="icon-btn" title="Refresh now" aria-label="Refresh">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 11v-5m0 5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="meta">
+        <span id="liveDot" class="dot"></span>
+        <span id="lastUpdate" class="muted">connecting…</span>
+      </div>
+    </div>
   </header>
+
+  <nav class="tabs">
+    <button data-view="overview" class="active">Overview</button>
+    <button data-view="trades">Trades</button>
+    <button data-view="decisions">Decisions</button>
+    <button data-view="license">License</button>
+  </nav>
 
   <main>
     <section id="view-overview" class="view active">
       <div id="cards" class="cards"></div>
-      <div class="panel">
-        <h2>Equity curve</h2>
-        <canvas id="equityChart" height="220"></canvas>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Equity curve</h2>
+            <span id="eqMeta" class="muted"></span>
+          </div>
+          <div class="chart-box">
+            <canvas id="equityChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Risk posture</h2></div>
+          <div id="riskBars"></div>
+        </div>
       </div>
       <div class="panel">
-        <h2>Open positions</h2>
-        <table id="positionsTable">
-          <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Last</th><th>uPnL</th><th>uPnL %</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <p id="positionsEmpty" class="muted">No open positions.</p>
+        <div class="panel-head">
+          <h2>Open positions</h2>
+          <span id="posCount" class="muted"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Last</th><th>uPnL</th><th>uPnL %</th></tr></thead>
+            <tbody id="positionsBody"></tbody>
+          </table>
+        </div>
+        <p id="positionsEmpty" class="empty">No open positions.</p>
       </div>
     </section>
 
     <section id="view-trades" class="view">
+      <div class="stat-strip" id="tradeStats"></div>
       <div class="panel">
-        <h2>Closed trades</h2>
-        <table>
-          <thead><tr><th>Opened</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>P&amp;L %</th><th>Reason</th><th>Conviction</th></tr></thead>
-          <tbody id="tradesBody"></tbody>
-        </table>
+        <div class="panel-head"><h2>Closed trades</h2></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Closed</th><th>Opened</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>P&amp;L %</th><th>Reason</th><th>Conviction</th></tr></thead>
+            <tbody id="tradesBody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
     <section id="view-decisions" class="view">
       <div class="panel">
-        <h2>Decision journal</h2>
-        <table>
-          <thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Conviction</th><th>Details</th></tr></thead>
-          <tbody id="decisionsBody"></tbody>
-        </table>
+        <div class="panel-head"><h2>Decision journal</h2></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Conviction</th><th>Details</th></tr></thead>
+            <tbody id="decisionsBody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
     <section id="view-license" class="view">
       <div class="panel">
-        <h2>Subscription license</h2>
-        <div id="licenseStatus" class="license-box"></div>
-        <h3>Verify a key</h3>
-        <input id="verifyInput" type="text" placeholder="ATLAS.xxxx.yyyy" autocomplete="off">
-        <button id="verifyBtn">Verify</button>
-        <div id="verifyResult"></div>
-        <h3>Generate / renew keys (admin)</h3>
-        <label>Admin token <input id="adminToken" type="password" autocomplete="off"></label>
-        <label>Customer <input id="customer" type="text" placeholder="acme-trader"></label>
-        <label>Months <input id="months" type="number" value="1" min="1"></label>
-        <div>
-          <button id="genBtn">Generate</button>
-          <button id="renewBtn">Renew (re-sign current key +N months)</button>
+        <div class="panel-head"><h2>Subscription license</h2></div>
+        <div id="licenseStatus" class="license-box bad">Checking…</div>
+
+        <div class="license-tools">
+          <div class="tool">
+            <h3>Verify a key</h3>
+            <div class="row">
+              <input id="verifyInput" type="text" placeholder="ATLAS.xxxx.yyyy" autocomplete="off" spellcheck="false">
+              <button id="verifyBtn" class="primary">Verify</button>
+            </div>
+            <div id="verifyResult" class="result"></div>
+          </div>
+
+          <div class="tool">
+            <h3>Generate / renew keys</h3>
+            <div class="field"><label>Admin token</label><input id="adminToken" type="password" autocomplete="off"></div>
+            <div class="row">
+              <div class="field grow"><label>Customer</label><input id="customer" type="text" placeholder="acme-trader"></div>
+              <div class="field"><label>Months</label><input id="months" type="number" value="1" min="1"></div>
+            </div>
+            <div class="row">
+              <button id="genBtn" class="primary">Generate</button>
+              <button id="renewBtn">Renew current +N</button>
+            </div>
+            <div id="genResult" class="result"></div>
+          </div>
         </div>
-        <div id="genResult"></div>
       </div>
     </section>
   </main>
+
+  <footer class="muted">ATLAS dashboard · data refreshes automatically every 30s</footer>
 
   <template id="cardTmpl">
     <div class="card"><div class="k"></div><div class="v"></div></div>

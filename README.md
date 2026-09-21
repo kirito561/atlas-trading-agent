@@ -32,9 +32,9 @@ other/
 | Internal contradictions (8% cap vs 2% risk; defensive widening stops; cash reserve vs aggressive; long-term holds vs stops; undefined confidence trigger) | All resolved deterministically — see [Risk rules](#risk-rules-non-negotiable-enforced-in-code). Stops are bounded to 0.3–15%; because the position cap also binds, widening a stop can never push effective risk past the budget. Modes scale only the **position cap**, never the per-trade risk budget or the cash reserve. There are no "long-term hold" exemptions: every position has a stop and halt closes everything. No LLM confidence anywhere — mode triggers are measurable drawdown/day-loss thresholds. |
 | Quantitative mode switching | `operate_mode()` in the risk manager uses only numbers: drawdown ≥ 3% **or** day-loss ≥ 1.5% ⇒ `defensive`; drawdown ≥ 10% ⇒ `halt`; optional `aggressive` only when drawdown < 1% and day P&L ≥ 0. Every transition is logged + notified. |
 | Fees, slippage, liquidity, spread limits | `ATLAS_FEE_RATE` + `ATLAS_SLIPPAGE` model execution cost (paper). `ATLAS_MAX_SPREAD_PCT` and `ATLAS_MIN_VOLUME_24H` reject entries on illiquid/wide markets (`validate_ticker` runs immediately before the order). |
-| Failure handling (API errors, stale data, timeouts, duplicates, kill switch) | Retry+backoff on Bybit data; stale-candle guard skips a symbol if its last candle is older than `timeframe × ATLAS_STALE_DATA_MULTIPLIER`; duplicate-entry guard (one position per symbol); retries around every fetch/close; `python -m engine kill` drop/kill file halts+closes positions on the next cycle and is the physical kill switch. |
+| Failure handling (API errors, stale data, timeouts, duplicates, kill switch) | Retry+backoff on Bybit data; stale-candle guard skips a symbol if its last candle is older than `timeframe × ATLAS_STALE_DATA_MULTIPLIER`; duplicate-entry guard (one position per symbol); retries around every fetch/close; `python -m engine kill` halts+closes on the next cycle, and in live mode it also cancels open orders and flattens positions **immediately via the exchange API**. Every kill path cancels open orders before flattening. |
 | Market hours & asset-specific rules, short/margin policy | Crypto is 24/7; `ATLAS_ALLOW_SHORT` gates shorts; `ATLAS_MAX_LEVERAGE=1` is enforced per entry in live mode via `set_leverage` before every order; watchlist is the explicit asset allow-list. |
-| Persistent state | ATLAS has **no memory between cycles**. Every cycle reloads `data/state.json`, `data/positions.json` and the SQLite journal, so a crash/restart resumes exactly. The dashboard reads only from the journal. |
+| Persistent state | ATLAS has **no memory between cycles**. Every cycle reloads `data/state.json`, `data/positions.json` and the SQLite journal, reconciles its positions against the source of truth (the positions file in paper, the exchange in live), so a crash/restart resumes exactly. Files are written atomically (temp file + rename) and `data/atlas.lock` prevents two engine processes (or a `reset`) from running at once. The dashboard reads only from the journal. |
 | Compliance specifics | Jurisdiction risk is documented in [Legal & risk disclosure](#legal--risk-disclosure-read-this); the lightest path is licensing software the customer runs with their own exchange keys. |
 | Tool schemas instead of prose | This README (API surface, function signatures) + `engine/cli.py` `argparse` are the tool contract. See [Function & API surface](#function--api-surface). |
 | Conviction must be tested, not believed | Every score and outcome is journaled; `python -m engine stats` computes win rate by conviction band / side / exit reason. Verify an edge exists before trusting it. |
@@ -96,8 +96,9 @@ another, then open the dashboard — it auto-refreshes every 30s.
 | `ATLAS_TREND_TIMEFRAME` | `1h` | Analysis candle timeframe |
 | `ATLAS_MIN_CONVICTION` | `7` | Conviction (1-10) required to enter |
 | `ATLAS_RISK_PER_TRADE` | `0.02` | Max 2% of equity risked per trade (never exceeded by any mode) |
-| `ATLAS_MAX_POSITION_PCT` | `0.08` | Max 8% of equity in a single position (scaled by mode factor) |
+| `ATLAS_MAX_POSITION_PCT` | `0.08` | Max 8% of equity in a single position — an **absolute ceiling** in every mode (mode factors can only shrink it) |
 | `ATLAS_MAX_POSITIONS` | `4` | Max concurrent positions |
+| `ATLAS_CORRELATED_EXPOSURE_CAP` | `0.20` | Max 20% of equity in total open notional (`can_open_more` blocks past this) |
 | `ATLAS_STOP_PCT` | `0.03` | Fallback stop distance if ATR is unavailable |
 | `ATLAS_TAKE_PROFIT_RR` | `1.5` | Take-profit = risk:reward multiplier |
 | `ATLAS_DRAWDOWN_HALT` | `0.10` | 10% portfolio drawdown -> full halt + close positions |
@@ -106,16 +107,17 @@ another, then open the dashboard — it auto-refreshes every 30s.
 | `ATLAS_COOLDOWN_MINUTES` | `30` | Lockout after a losing trade |
 | `ATLAS_ALLOW_SHORT` | `false` | Enable short signals (paper/perp) |
 | `ATLAS_FEE_RATE` / `ATLAS_SLIPPAGE` | `0.001` / `0.0005` | Simulated execution cost applied to paper fills |
+| `ATLAS_FUNDING_RATE` | `0.0001` | Perpetual funding rate per 8h period; charged to paper positions on close (per held period) and folded into journaled P&L |
 | `ATLAS_MAX_SPREAD_PCT` | `1.0` | Reject entry if bid/ask spread > 1% of last price |
 | `ATLAS_MIN_VOLUME_24H` | `0` | Skip symbols with 24h quote volume below this (liquidity gate) |
 | `ATLAS_MAX_LEVERAGE` | `1` | Margin cap; enforced per live entry (spot = n/a) |
 | `ATLAS_STALE_DATA_MULTIPLIER` | `3` | Skip a symbol if its last candle is > timeframe × this old |
 | `ATLAS_ESCALATE_LOSS_PCT` | `0.015` | CRITICAL alert when one losing trade costs >1.5% of equity |
-| `ATLAS_AGGRESSIVE_ENABLED` | `false` | Allow `aggressive` mode (scales position cap ×1.2, still ≤ risk budget) |
+| `ATLAS_AGGRESSIVE_ENABLED` | `false` | Allow `aggressive` mode. Its cap factor is **clamped to the absolute `ATLAS_MAX_POSITION_PCT`** — it can never enlarge a position past the ceiling, it only confirms full headroom |
 | `ATLAS_DEFENSIVE_DRAWDOWN` | `0.03` | Drawdown threshold that switches mode to `defensive` |
 | `ATLAS_DAY_LOSS_DEFENSIVE` | `0.015` | Same-day realized loss that switches mode to `defensive` |
 | `ATLAS_DEFENSIVE_MIN_CONVICTION` | `8` | Conviction floor during defensive mode |
-| `ATLAS_AGGRESSIVE_SIZE_FACTOR` | `1.2` | Position-cap multiplier in aggressive mode |
+| `ATLAS_AGGRESSIVE_SIZE_FACTOR` | `1.2` | Aggressive position-cap multiplier, clamped to the absolute cap (`min(factor, 1.0)` applies) |
 | `ATLAS_DEFENSIVE_SIZE_FACTOR` | `0.6` | Position-cap multiplier in defensive mode |
 | `BYBIT_API_KEY/SECRET` | — | Only used in `ATLAS_MODE=live` |
 | `BYBIT_TESTNET` | `false` | Use Bybit testnet for live mode |
@@ -139,8 +141,8 @@ another, then open the dashboard — it auto-refreshes every 30s.
    No trade below `ATLAS_MIN_CONVICTION` (raised to `ATLAS_DEFENSIVE_MIN_CONVICTION`
    in defensive mode); shorts require `ATLAS_ALLOW_SHORT`.
 4. **Size** — position is risk-capped: `equity × risk_per_trade ÷ stop
-   distance`, then clamped by the position cap (scaled by the operating mode)
-   and the cash reserve. The resulting effective risk
+   distance`, then clamped by the position cap (an absolute ceiling; mode
+   factors only shrink it) and the cash reserve. The resulting effective risk
    (size × entry × stop distance) is re-checked against the
    `equity × risk_per_trade` budget before the order is allowed to open.
 5. **Execute** — the live ticker is validated (spread ≤ `ATLAS_MAX_SPREAD_PCT`,
@@ -159,7 +161,11 @@ The agent has **zero memory between cycles** — positions, state and the
 journal all reload from `data/` on every tick, so it restarts cleanly after
 any crash or redeploy. A physical kill switch (`data/kill`, written by
 `python -m engine kill`) forces a full close+halt and is the deterministic
-stop override for a running session.
+stop override for a running session. In live mode `kill` additionally cancels
+open orders and flattens positions immediately through the exchange API; the
+engine itself also runs reconcile first and cancels orders before flattening
+on any kill path. A single-instance lock (`data/atlas.lock`) refuses a second
+engine process or a mid-flight `reset`.
 
 ### Progression tables for conviction
 
@@ -178,23 +184,26 @@ stop override for a running session.
 
 - Max **2%** of equity risked per trade (entry-to-stop distance × size).
   This budget is **never exceeded**, in any operating mode.
-- Max **8%** of equity in any single position (scaled by mode: ×1.2
-  aggressive, ×0.6 defensive).
+- Max **8%** of equity in any single position — an **absolute ceiling**. Mode
+  factors can only shrink it (defensive ×0.6); aggressive cannot grow past it.
 - **Stop-loss on every position** — no exemptions, no "long-term holds".
 - **10% drawdown** from peak ⇒ full halt, positions closed, cash held.
 - **3% same-day realized loss** ⇒ trading halts until the next UTC day.
 - **>20% must stay in cash** (`ATLAS_CASH_RESERVE`) — a hard floor no mode can
-  touch (aggressive mode grows exposure only within the remaining envelope).
+  touch.
 - Losing trade ⇒ **30 min cooldown** before the next entry.
-- Collective exposure against a 50% portfolio cap.
+- **Correlation cap**: total open notional ≤ `ATLAS_CORRELATED_EXPOSURE_CAP`
+  (20%) of equity (`can_open_more` blocks new entries past it).
 - Stops are bounded to **0.3%–15%** from entry.
 
 > **Why the 2%-vs-8% contradiction resolves itself:** the position cap is a
 > second, tighter budget. With an 8% cap, effective risk = 8% × stop width.
 > Even at the widest allowed stop (15%) that is 1.2% — under the 2% budget.
 > So *widening* a stop (e.g. via ATR in defensive regimes) can never break the
-> 2% rule: the cap absorbs it. Aggressive mode raises the cap, not the budget,
-> and the final effective-risk re-check in `size_position` closes the loop.
+> 2% rule: the cap absorbs it. The aggressive factor is clamped to
+> `min(factor, 1.0)` so no mode ever produces a 9.6% position; the 8% ceiling
+> is a hard constant in every mode. The final effective-risk re-check in
+> `size_position` closes the loop.
 
 ### Operating modes (all thresholds measurable, no LLM confidence)
 
@@ -202,7 +211,7 @@ stop override for a running session.
 |---|---|---|
 | `normal` | default | cap ×1.0, conviction floor = `ATLAS_MIN_CONVICTION` |
 | `defensive` | drawdown ≥ `ATLAS_DEFENSIVE_DRAWDOWN` (3%) **or** same-day loss ≥ `ATLAS_DAY_LOSS_DEFENSIVE` (1.5%) | cap × `ATLAS_DEFENSIVE_SIZE_FACTOR` (0.6), conviction floor = `ATLAS_DEFENSIVE_MIN_CONVICTION` (8) |
-| `aggressive` | only if `ATLAS_AGGRESSIVE_ENABLED=true`, drawdown < 1% **and** day P&L ≥ 0 | cap × `ATLAS_AGGRESSIVE_SIZE_FACTOR` (1.2), still never above the 2% risk budget |
+| `aggressive` | only if `ATLAS_AGGRESSIVE_ENABLED=true`, drawdown < 1% **and** day P&L ≥ 0 | full headroom up to the absolute cap (factor clamped to 1.0), still never above the 2% risk budget |
 | `halt` | drawdown ≥ `ATLAS_DRAWDOWN_HALT` (10%) or daily-loss limit or kill switch | no entries; all positions closed |
 
 Every transition is notified (INFO/WARNING/CRITICAL) and recorded in the
@@ -236,6 +245,30 @@ noise and no amount of automation will fix that — tune the signal weights in
 `engine/analysis/technical.py` and re-backtest.
 
 ---
+
+## Definition of done ("it works properly")
+
+ATLAS is **not done** just because the loop runs. It is done when all four
+hold, measured on the real journal (`python -m engine stats`, `equity`, and
+backtests):
+
+1. **Positive expectancy after all costs.** Realized profitability is positive
+   after fees, slippage and funding over **100+ trades**, not over a lucky
+   handful. If funding is charged in paper but not modeled in backtest, the
+   numbers are wrong — both charge it.
+2. **Drawdown stays far below the halt.** The 10% halt must be a rare
+   backstop, not a recurring event you rely on. Expect deep drawdowns to read
+   as warnings, not as the normal way the month ends.
+3. **Conviction predicts outcomes.** `python -m engine stats` shows higher
+   conviction bands with **higher win rates**. If the bands are flat or
+   inverted, the signal is noise — tune the weights, don't ship it.
+4. **Every failure test passes.** Kill switch (`.\\venv\\Scripts\\python.exe -m
+   engine kill`) closes and halts; a killed loop restarts with resumable
+   state; stale candles skip a symbol; a second engine process is refused by
+   the lock; reconcile re-adopts positions after a crash.
+
+Do **not** sell the product or run meaningful live money until 1–3 hold on
+paper; sell only the software license, never the promise of returns.
 
 ## Readiness checklist (paper → live)
 
@@ -295,6 +328,13 @@ engine/broker/base.py (interface implemented by PaperBroker / BybitLiveBroker)
   update_position(position, *, stop, target) -> Position
   mark_to_market() -> float
   get_balance() -> dict
+  get_positions() -> list[Position]
+  reconcile() -> {"adopted","orphans","dropped"}   # disk/paper or exchange/live
+  cancel_all_open_orders() -> None                 # used by every kill path
+  flatten() -> list[ClosedTrade]                   # cancel + market-close everything (live) / mark-close (paper)
+engine/lock.py InstanceLock
+  acquire(hold=True) -> bool                       # single engine process (data/atlas.lock)
+  release() -> None
 engine/memory/storage.py Store
   record_trade / record_decision / record_equity / snapshot_positions / win_stats
 CLI (python -m engine <cmd>)

@@ -101,10 +101,10 @@ class RiskManager:
 
     def _cap_factor(self) -> float:
         mode = self.operate_mode()
-        if mode == "aggressive":
-            return self.cfg.aggressive_size_factor
         if mode == "defensive":
-            return self.cfg.defensive_size_factor
+            return min(self.cfg.defensive_size_factor, 1.0)
+        if mode == "aggressive":
+            return min(self.cfg.aggressive_size_factor, 1.0)
         return 1.0
 
     def risk_enabled(self) -> bool:
@@ -183,8 +183,8 @@ class RiskManager:
         if portfolio <= 0:
             return False, "zero equity"
         from .portfolio import portfolio_summary
-        if invested / portfolio >= 0.5:
-            return False, "correlated exposure cap reached"
+        if invested / portfolio >= self.cfg.correlated_exposure_cap:
+            return False, f"correlated exposure cap {self.cfg.correlated_exposure_cap:.0%} reached"
         return True, "ok"
 
     def record_trade_result(self, pnl: float) -> None:

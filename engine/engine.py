@@ -41,8 +41,16 @@ class Engine:
 
     def cycle(self) -> dict:
         result: dict = {"entries": [], "exits": [], "skipped": []}
+        try:
+            self.broker.reconcile()
+        except Exception as e:
+            log.warning("reconcile failed: %s", e)
         notify = self._check_kill_switch()
         if notify:
+            try:
+                self.broker.cancel_all_open_orders()
+            except Exception as e:
+                log.warning("cancel orders failed: %s", e)
             self.close_engine_positions(ExitReason.RISK_HALT.value)
             equity = self.risk.equity()
             self.risk.run_cycle_hooks(equity)

@@ -63,6 +63,7 @@ class Config:
     risk_per_trade: float = 0.02
     max_position_pct: float = 0.08
     max_positions: int = 4
+    correlated_exposure_cap: float = 0.20
     stop_pct: float = 0.03
     take_profit_rr: float = 1.5
     trail_stop: bool = True
@@ -71,6 +72,7 @@ class Config:
     daily_loss_limit: float = 0.03
     cash_reserve: float = 0.20
     cooldown_minutes: int = 30
+    funding_rate: float = 0.0001
     allow_short: bool = False
     max_hold_bars: int = 96
     min_conviction: int = 7
@@ -115,6 +117,7 @@ class Config:
             risk_per_trade=_get_float("ATLAS_RISK_PER_TRADE", 0.02),
             max_position_pct=_get_float("ATLAS_MAX_POSITION_PCT", 0.08),
             max_positions=_get_int("ATLAS_MAX_POSITIONS", 4),
+            correlated_exposure_cap=_get_float("ATLAS_CORRELATED_EXPOSURE_CAP", 0.20),
             stop_pct=_get_float("ATLAS_STOP_PCT", 0.03),
             take_profit_rr=_get_float("ATLAS_TAKE_PROFIT_RR", 1.5),
             trail_stop=_get_bool("ATLAS_TRAIL_STOP", True),
@@ -123,6 +126,7 @@ class Config:
             daily_loss_limit=_get_float("ATLAS_DAILY_LOSS_LIMIT", 0.03),
             cash_reserve=_get_float("ATLAS_CASH_RESERVE", 0.20),
             cooldown_minutes=_get_int("ATLAS_COOLDOWN_MINUTES", 30),
+            funding_rate=_get_float("ATLAS_FUNDING_RATE", 0.0001),
             allow_short=_get_bool("ATLAS_ALLOW_SHORT", False),
             max_hold_bars=_get_int("ATLAS_MAX_HOLD_BARS", 96),
             min_conviction=_get_int("ATLAS_MIN_CONVICTION", 7),
@@ -166,6 +170,10 @@ class Config:
     @property
     def db_file(self) -> Path:
         return self.data_dir / "atlas.db"
+
+    @property
+    def lock_file(self) -> Path:
+        return self.data_dir / "atlas.lock"
 
     @property
     def positions_file(self) -> Path:

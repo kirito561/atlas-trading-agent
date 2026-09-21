@@ -9,6 +9,7 @@ from .base import Broker
 
 FEE_RATE_DEFAULT = 0.001
 SLIPPAGE_DEFAULT = 0.0005
+FUNDING_PERIOD_HOURS = 8.0
 
 
 class PaperBroker(Broker):
@@ -19,7 +20,8 @@ class PaperBroker(Broker):
         self._fetcher = fetcher
         self.fee_rate = cfg.fee_rate
         self.slippage = cfg.slippage
-        self._load()
+        self.reconcile()
+        self._persist()
 
     @property
     def mode(self) -> str:
@@ -46,6 +48,12 @@ class PaperBroker(Broker):
                     self._positions[position.symbol] = position
             except (json.JSONDecodeError, OSError, KeyError, ValueError):
                 pass
+
+    def reconcile(self) -> dict:
+        seen = set(self._positions)
+        self._load()
+        adopted = [s for s in self._positions if s not in seen]
+        return {"adopted": adopted, "orphans": [], "dropped": []}
 
     def _persist(self) -> None:
         data = {
@@ -110,19 +118,40 @@ class PaperBroker(Broker):
         self._persist()
         return position
 
+    def _funding_cost(self, position: Position) -> float:
+        if self._fetcher is not None:
+            hours = max(1.0, position.bars_held)
+        else:
+            hours = max(0.0, (time.time() - position.opened_at) / 3600.0)
+        return position.qty * position.entry * self.cfg.funding_rate * (hours / FUNDING_PERIOD_HOURS)
+
     def close_position(self, position: Position, price: float, reason: str) -> ClosedTrade:
         fill = price * (1 - self.slippage) if position.side == Side.LONG else price * (1 + self.slippage)
         notional_entry = position.qty * position.entry
         fee = notional_entry * self.fee_rate
+        funding = self._funding_cost(position)
         if position.side == Side.LONG:
-            self._cash += position.qty * fill - fee
+            self._cash += position.qty * fill - fee - funding
         else:
             pnl = (position.entry - fill) * position.qty
-            self._cash += notional_entry + pnl - fee
+            self._cash += notional_entry + pnl - fee - funding
         self._positions.pop(position.symbol, None)
         trade = ClosedTrade.from_position(position, fill, ExitReason(reason) if reason in ExitReason._value2member_map_ else ExitReason.MANUAL, self.fee_rate)
+        trade.pnl -= funding
+        trade.pnl_pct = trade.pnl / notional_entry if notional_entry else 0.0
         self._persist()
         return trade
+
+    def flatten(self) -> list[ClosedTrade]:
+        closed = []
+        for symbol in list(self._positions.keys()):
+            position = self._positions[symbol]
+            try:
+                ticker = self.fetch_ticker(symbol)
+                closed.append(self.close_position(position, ticker.last, "risk_halt"))
+            except Exception:
+                continue
+        return closed
 
     def update_position(self, position: Position, *, stop: float | None = None,
                         target: float | None = None) -> Position:
